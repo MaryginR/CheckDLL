@@ -61,68 +61,49 @@ std::string check_mac(const char* mac) {
 #ifdef _WIN32
 
 std::string getVMonMAC() {
-    PIP_ADAPTER_INFO AdapterInfo;
-    DWORD dwBufLen = sizeof(IP_ADAPTER_INFO);
-    char* mac_addr = (char*)malloc(18);
+    IP_ADAPTER_INFO AdapterInfo;
+    DWORD dwBufLen = sizeof(AdapterInfo);
+    std::string mac_addr;
 
-    AdapterInfo = (IP_ADAPTER_INFO*)malloc(sizeof(IP_ADAPTER_INFO));
-    if (AdapterInfo == NULL) {
-        //printf("Error allocating memory needed to call GetAdaptersinfo\n");
-        free(mac_addr);
-        return "ERR";
-    }
+    if (GetAdaptersInfo(&AdapterInfo, &dwBufLen) == ERROR_BUFFER_OVERFLOW) {
+        // Если буфер недостаточен, выделяем новый
+        PIP_ADAPTER_INFO pAdapterInfo = reinterpret_cast<PIP_ADAPTER_INFO>(new char[dwBufLen]);
+        if (pAdapterInfo != nullptr) {
+            if (GetAdaptersInfo(pAdapterInfo, &dwBufLen) == NO_ERROR) {
+                // Указатель на адаптеры
+                PIP_ADAPTER_INFO pCurrentAdapter = pAdapterInfo;
 
-    // Вызов GetAdapterInfo что бы получить длину в dwBufLen
-    if (GetAdaptersInfo(AdapterInfo, &dwBufLen) == ERROR_BUFFER_OVERFLOW) {
-        free(AdapterInfo);
-        AdapterInfo = (IP_ADAPTER_INFO*)malloc(dwBufLen);
-        if (AdapterInfo == NULL) {
-            //printf("Error allocating memory needed to call GetAdaptersinfo\n");
-            free(mac_addr);
-            return "ERR";
+                // Обходим в цикле все mac адреса и проверяем oui на наличие адресов виртуальных машин
+                do {
+                    if (pCurrentAdapter->AddressLength > 0 && pCurrentAdapter->Address != nullptr) {
+                        std::stringstream ss;
+                        for (unsigned int i = 0; i < pCurrentAdapter->AddressLength; ++i) {
+                            ss << std::uppercase << std::setfill('0') << std::setw(2) << std::hex << static_cast<int>(pCurrentAdapter->Address[i]);
+                            if (i < pCurrentAdapter->AddressLength - 1) {
+                                ss << ":";
+                            }
+                        }
+                        mac_addr = ss.str();
+                        break;
+                    }
+                    pCurrentAdapter = pCurrentAdapter->Next;
+                } while (pCurrentAdapter);
+            }
+            delete[] reinterpret_cast<char*>(pAdapterInfo);
         }
     }
 
-    if (GetAdaptersInfo(AdapterInfo, &dwBufLen) == NO_ERROR) {
-        // Указатель на адаптеры
-        PIP_ADAPTER_INFO pAdapterInfo = AdapterInfo;
-
-        // Обходим в цикле все mac адреса и проверяем oui на наличие адресов виртуальных машин
-        do {
-            if (pAdapterInfo->AddressLength > 0 && pAdapterInfo->Address != nullptr) {
-                if (!(mac_addr == 0)) {
-                    std::stringstream ss;
-                    for (unsigned int i = 0; i < pAdapterInfo->AddressLength; ++i) {
-                        ss << std::uppercase << std::setfill('0') << std::setw(2) << std::hex << static_cast<int>(pAdapterInfo->Address[i]);
-                        if (i < pAdapterInfo->AddressLength - 1) {
-                            ss << ":";
-                        }
-                    }
-                    strcpy(mac_addr, ss.str().c_str());
-                }
-
-                if (!(mac_addr == 0)) {
-                    std::string check_result = check_mac(mac_addr);
-                    if (check_result == "host") {
-                        pAdapterInfo = pAdapterInfo->Next;
-                    }
-                    else {
-                        free(AdapterInfo);
-                        return check_result;
-                    }
-                }
-                else {
-                    pAdapterInfo = pAdapterInfo->Next;
-                }
-            }
-            else
-            {
-                pAdapterInfo = pAdapterInfo->Next;
-            }
-        } while (pAdapterInfo);
+    if (!mac_addr.empty()) {
+        std::string check_result = check_mac(mac_addr.c_str());
+        if (check_result == "host") {
+            return "host";
+        }
+        else {
+            return check_result;
+        }
     }
-    free(AdapterInfo);
-    return "host";
+
+    return "ERR";
 }
 
 
