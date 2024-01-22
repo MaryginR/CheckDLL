@@ -45,7 +45,9 @@ MacVirtualMachinePair vmPairs[] = {
 };
 
 // Функция, которая сравнивает MAC-адрес с массивом MacVirtualMachinePair и возвращает соответствующее название виртуальной машины
-std::string check_mac(const char* mac) {
+std::string check_mac(std::string macAd) {
+
+    const char* mac = macAd.c_str();
 
     int numPairs = sizeof(vmPairs) / sizeof(vmPairs[0]);
 
@@ -61,49 +63,44 @@ std::string check_mac(const char* mac) {
 #ifdef _WIN32
 
 std::string getVMonMAC() {
-    IP_ADAPTER_INFO AdapterInfo;
-    DWORD dwBufLen = sizeof(AdapterInfo);
-    std::string mac_addr;
+    IP_ADAPTER_INFO* AdapterInfo = nullptr;
+    DWORD dwBufLen = 0;
 
-    if (GetAdaptersInfo(&AdapterInfo, &dwBufLen) == ERROR_BUFFER_OVERFLOW) {
-        // Если буфер недостаточен, выделяем новый
-        PIP_ADAPTER_INFO pAdapterInfo = reinterpret_cast<PIP_ADAPTER_INFO>(new char[dwBufLen]);
-        if (pAdapterInfo != nullptr) {
-            if (GetAdaptersInfo(pAdapterInfo, &dwBufLen) == NO_ERROR) {
-                // Указатель на адаптеры
-                PIP_ADAPTER_INFO pCurrentAdapter = pAdapterInfo;
+    if (GetAdaptersInfo(nullptr, &dwBufLen) == ERROR_BUFFER_OVERFLOW) {
+        AdapterInfo = reinterpret_cast<IP_ADAPTER_INFO*>(new char[dwBufLen]);
+        if (AdapterInfo == nullptr) {
+            return "ERR";
+        }
 
-                // Обходим в цикле все mac адреса и проверяем oui на наличие адресов виртуальных машин
-                do {
-                    if (pCurrentAdapter->AddressLength > 0 && pCurrentAdapter->Address != nullptr) {
-                        std::stringstream ss;
-                        for (unsigned int i = 0; i < pCurrentAdapter->AddressLength; ++i) {
-                            ss << std::uppercase << std::setfill('0') << std::setw(2) << std::hex << static_cast<int>(pCurrentAdapter->Address[i]);
-                            if (i < pCurrentAdapter->AddressLength - 1) {
-                                ss << ":";
-                            }
+        if (GetAdaptersInfo(AdapterInfo, &dwBufLen) == NO_ERROR) {
+            IP_ADAPTER_INFO* pAdapterInfo = AdapterInfo;
+
+            while (pAdapterInfo != nullptr) {
+                if (pAdapterInfo->AddressLength > 0 && pAdapterInfo->Address != nullptr) {
+                    std::stringstream ss;
+                    for (unsigned int i = 0; i < pAdapterInfo->AddressLength; ++i) {
+                        ss << std::uppercase << std::setfill('0') << std::setw(2) << std::hex << static_cast<int>(pAdapterInfo->Address[i]);
+                        if (i < pAdapterInfo->AddressLength - 1) {
+                            ss << ":";
                         }
-                        mac_addr = ss.str();
-                        break;
                     }
-                    pCurrentAdapter = pCurrentAdapter->Next;
-                } while (pCurrentAdapter);
+                    std::string mac_addr = ss.str();
+
+                    std::string check_result = check_mac(mac_addr);
+                    if (check_result != "host") {
+                        delete[] reinterpret_cast<char*>(AdapterInfo);
+                        return check_result;
+                    }
+                }
+
+                pAdapterInfo = pAdapterInfo->Next;
             }
-            delete[] reinterpret_cast<char*>(pAdapterInfo);
         }
+
+        delete[] reinterpret_cast<char*>(AdapterInfo);
     }
 
-    if (!mac_addr.empty()) {
-        std::string check_result = check_mac(mac_addr.c_str());
-        if (check_result == "host") {
-            return "host";
-        }
-        else {
-            return check_result;
-        }
-    }
-
-    return "ERR";
+    return "host";
 }
 
 
